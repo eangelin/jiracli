@@ -1,0 +1,5 @@
+[jira]
+url=http://jiraserver.test.com/jira/
+token_store=~/.jiracli.token
+
+
