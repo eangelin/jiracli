@@ -246,8 +246,9 @@ def add_comment(client, config, args):
         args.comment = read_multiline(args, 'comment')
     client.add_comment(get_expanded_issue_arg(args), args.comment)
 
-def assign_issue_to_me(client, config, args):
-    client.update_issue(get_expanded_issue_arg(args), assignee=[args.username])
+def assign_issues_to_me(client, config, args):
+    for issue in get_expanded_issues_arg(args):
+        client.update_issue(issue, assignee=[args.username])
 
 def unassign_issue(client, config, args):
     client.update_issue(get_expanded_issue_arg(args), assignee=[])
@@ -360,8 +361,8 @@ def add_comment_issue_parser(subs, client, config):
 
 def add_assign_issue_parsers(subs, client, config):
     dibs_parser = subs.add_parser(u'dibs')
-    dibs_parser.add_argument(u'issue')
-    dibs_parser.set_defaults(func=lambda args: assign_issue_to_me(client, config, args))
+    dibs_parser.add_argument(u'issues', nargs='+')
+    dibs_parser.set_defaults(func=lambda args: assign_issues_to_me(client, config, args))
     undib_parser = subs.add_parser(u'undib')
     undib_parser.add_argument(u'issue')
     undib_parser.set_defaults(func=lambda args: unassign_issue(client, config, args))
