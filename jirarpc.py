@@ -138,3 +138,6 @@ class JsonRpcClient(object):
 
     def get_versions(self, project_key):
         return _result(self.auth_call("getVersions", project_key))
+
+    def get_user(self, username):
+        return _result(self.auth_call("getUser", username))

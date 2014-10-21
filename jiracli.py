@@ -194,6 +194,20 @@ find_what_map = {
 def prefixed_version(version):
     return version and version[0] == u'@'
 
+def user_possessive_s(username):
+    return username and username[-1] == u's'
+
+def strip_possessive_s(username):
+    if not user_possessive_s(username):
+        return username
+    if len(username) > 2 and username[-2:] == u"'s":
+        return username[:-2]
+    elif username[-1:] == "s":
+        return username[:-1]
+
+def user_exists(username, client):
+    return client.get_user(username)
+
 def strip_version_prefix(version):
     return version[1:] if prefixed_version(version) else version
 
@@ -207,6 +221,9 @@ def find_issues(client, config, args):
     elif prefixed_version(args.what): # treat as fixVersion
         jql_template = u'project=%(project)s and fixVersion = "%(version)s" order by ' + default_order
         params[u'version'] = strip_version_prefix(args.what)
+    elif user_possessive_s(args.what) and user_exists(strip_possessive_s(args.what), client):
+        jql_template = find_what_map['mine']
+        params['username'] = strip_possessive_s(args.what)
     else:
         jql_template = u'project=%(project)s and (summary ~ "%(search)s" OR description ~ "%(search)s" OR comment ~ "%(search)s") order by ' + default_order
         params[u'search'] = args.what
