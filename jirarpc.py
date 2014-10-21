@@ -83,9 +83,6 @@ class JsonRpcClient(object):
     def get_issues_from_jql_search(self, jql, max_count=10000):
         return _result(self.auth_call("getIssuesFromJqlSearch", jql, max_count))
 
-    def search_open_issues(self, project):
-        return self.jql_search("project=%(project)s AND status = open" % { "project": project })
-
     def create_issue(self, project, summary, description, typeid, customs = {}):
         issue = {
             "project": project,
@@ -108,6 +105,12 @@ class JsonRpcClient(object):
 
     def progress_workflow_action(self, issue_key, action_id, **new_values):
         return _result(self.auth_call('progressWorkflowAction', issue_key, str(action_id), _create_action_params(new_values)))
+
+    def add_version(self, project, name):
+        return _result(self.auth_call('addVersion', project, { 'name': name }))
+
+    def release_version(self, project, version):
+        return _result(self.auth_call('releaseVersion', project, version))
 
     def get_issue_types(self):
         return _result(self.auth_call("getIssueTypes"))

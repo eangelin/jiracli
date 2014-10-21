@@ -10,6 +10,8 @@ import argparse
 import os
 import sys
 import codecs
+import time
+import calendar
 
 def stdin_stdout_encoding_hack():
     if sys.stdin.encoding is None:
@@ -51,6 +53,15 @@ def get_issue_arg(args):
 
 def get_expanded_issue_arg(args):
     return expand_issue_key(get_project_arg(args), get_issue_arg(args))
+
+def get_issues_arg(args):
+    if args.issues is not None:
+        return args.issues
+    raise ValueError(u'missing issue keys')
+
+def get_expanded_issues_arg(args):
+    project = get_project_arg(args)
+    return [expand_issue_key(project, issue) for issue in get_issues_arg(args)]
 
 def add_implicit_project_arg(args):
     if args.project is None and u'issue' in args and args.issue is not None:
@@ -210,7 +221,7 @@ def list_projects(client, config, args):
         print jirapprint.short_format_project(p)
 
 def list_versions(client, config, args):
-    for v in client.get_versions(get_project_arg(args)):
+    for v in sorted(client.get_versions(get_project_arg(args)), key=lambda v: v['sequence'], reverse=True):
         print jirapprint.short_format_version(v)
 
 def add_comment(client, config, args):
@@ -227,7 +238,7 @@ def unassign_issue(client, config, args):
 def get_version_id(versions, version):
     if prefixed_version(version):
         version_name = strip_version_prefix(version)
-        matches = [v for v in versions if v['name'] == version_name]
+        matches = [v for v in versions if v['name'].lower() == version_name.lower()]
         if len(matches) == 1:
             return matches[0]['id']
         else:
@@ -235,9 +246,52 @@ def get_version_id(versions, version):
     else:
         return version
 
+def find_version_index_by_id(versions, version_id):
+    matches = [ev for ev in enumerate(versions) if ev[1]['id'] == version_id]
+    if len(matches) == 1:
+        return matches[0][0]
+    else:
+        raise ValueError(u'invalid version id')
+
+def find_version_by_id(versions, version_id):
+    return versions[find_version_index_by_id(versions, version_id)]
+
+def unix_ts_millis_now():
+    return calendar.timegm(time.gmtime()) * 1000
+
+    return filter(lambda v: v['id'] != version, issue['fixVersions'])
+
+def status_openish(status, status_map):
+    return status_map[int(status)] in (u'open', 'reopened')
+
+def prune_version(client, config, args):
+    project = get_project_arg(args)
+    versions = client.get_versions(project)
+    version_id = get_version_id(versions, args.version)
+    jql = u'project=%(project)s and fixVersion= "%(version)s"' % { u'project': project, u'version': version_id}
+    version_issues = client.get_issues_from_jql_search(jql)
+    status_map = config.id_status_map()
+    for issue in version_issues:
+        if status_openish(issue['status'], status_map):
+            new_fix_versions = filter(lambda v: v['id'] != version_id, issue['fixVersions'])
+            client.update_issue(issue['key'], fixVersions=new_fix_versions)
+
+def add_version(client, config, args):
+    client.add_version(get_project_arg(args), args.name)
+
+def release_version(client, config, args):
+    versions = client.get_versions(get_project_arg(args))
+    version_id = get_version_id(versions, args.version)
+    version = find_version_by_id(versions, version_id)
+    version['released'] = True
+    version['releaseDate'] = unix_ts_millis_now()
+    client.release_version(get_project_arg(args), version)
+
 def fixin_version(client, config, args):
     version_id = get_version_id(client.get_versions(get_project_arg(args)), args.version)
-    client.update_issue(get_expanded_issue_arg(args), fixVersions=[version_id])
+    issues = get_expanded_issues_arg(args)
+    for issue in issues:
+        client.update_issue(issue, fixVersions=[version_id])
 
 ################################################################################
 
@@ -336,14 +390,32 @@ def add_info_subparsers(subs, client, config):
     add_versions_parser(subs, client, config)
     add_serverinfo_parser(subs, client, config)
 
+def add_prune_parser(subs, client, config):
+    prune_parser = subs.add_parser(u'prune')
+    prune_parser.add_argument(u'version')
+    prune_parser.set_defaults(func=lambda args: prune_version(client, config, args))
+
+def add_version_parser(subs, client, config):
+    version_parser = subs.add_parser(u'version')
+    version_parser.add_argument(u'name')
+    version_parser.set_defaults(func=lambda args: add_version(client, config, args))
+
+def add_release_parser(subs, client, config):
+    release_parser = subs.add_parser(u'release')
+    release_parser.add_argument(u'version')
+    release_parser.set_defaults(func=lambda args: release_version(client, config, args))
+
 def add_fixin_parser(subs, client, config):
     fixin_parser = subs.add_parser(u'fixin')
     fixin_parser.add_argument(u'version')
-    fixin_parser.add_argument(u'issue')
+    fixin_parser.add_argument(u'issues', nargs='+')
     fixin_parser.set_defaults(func=lambda args: fixin_version(client, config, args))
 
 def add_version_subparsers(subs, client, config):
     # subs = parser.add_subparsers(title=u'Version commands')
+    add_prune_parser(subs, client, config)
+    add_version_parser(subs, client, config)
+    add_release_parser(subs, client, config)
     add_fixin_parser(subs, client, config)
 
 def print_loaded_configs(config):
@@ -356,7 +428,7 @@ def add_loaded_parser(subs, client, config):
 
 def add_config_subparsers(subs, client, config):
     # subs = parser.add_subparsers(title=u'Config commands')
-    config_parser = subs.add_parser('config')
+    config_parser = subs.add_parser(u'config')
     config_subs = config_parser.add_subparsers()
     add_loaded_parser(config_subs, client, config)
 
