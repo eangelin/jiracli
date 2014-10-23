@@ -250,8 +250,9 @@ def assign_issues_to_me(client, config, args):
     for issue in get_expanded_issues_arg(args):
         client.update_issue(issue, assignee=[args.username])
 
-def unassign_issue(client, config, args):
-    client.update_issue(get_expanded_issue_arg(args), assignee=[])
+def unassign_issues(client, config, args):
+    for issue in get_expanded_issues_arg(args):
+        client.update_issue(issue, assignee=[])
 
 def get_version_id(versions, version):
     if prefixed_version(version):
@@ -276,8 +277,6 @@ def find_version_by_id(versions, version_id):
 
 def unix_ts_millis_now():
     return calendar.timegm(time.gmtime()) * 1000
-
-    return filter(lambda v: v['id'] != version, issue['fixVersions'])
 
 def status_openish(status, status_map):
     return status_map[int(status)] in (u'open', 'reopened')
@@ -364,8 +363,8 @@ def add_assign_issue_parsers(subs, client, config):
     dibs_parser.add_argument(u'issues', nargs='+')
     dibs_parser.set_defaults(func=lambda args: assign_issues_to_me(client, config, args))
     undib_parser = subs.add_parser(u'undib')
-    undib_parser.add_argument(u'issue')
-    undib_parser.set_defaults(func=lambda args: unassign_issue(client, config, args))
+    undib_parser.add_argument(u'issues', nargs='+')
+    undib_parser.set_defaults(func=lambda args: unassign_issues(client, config, args))
 
 def add_issue_subparsers(subs, client, config):
     # subs = parser.add_subparsers(title=u'Issue commands')
@@ -440,15 +439,48 @@ def print_loaded_configs(config):
     for cfg in config.loaded():
         print cfg
 
-def add_loaded_parser(subs, client, config):
-    loaded_parser = subs.add_parser('loaded')
-    loaded_parser.set_defaults(func=lambda args: print_loaded_configs(config))
+def add_configs_parser(subs, client, config):
+    configs_parser = subs.add_parser('configs')
+    configs_parser.set_defaults(func=lambda args: print_loaded_configs(config))
+
+def get_config_setting(client, config, args):
+    dotfile = jiracliconfig.global_dotfile() if args.global_ else jiracliconfig.custom_dotfile()
+    config = jiracliconfig.Config()
+    config.load([dotfile])
+    value = config.get_setting(args.setting)
+    if value:
+        print(value)
+
+def set_config_setting(client, config, args):
+    dotfile = jiracliconfig.force_global_dotfile() if args.global_ else jiracliconfig.force_custom_dotfile()
+    jiracliconfig.write_setting(dotfile, args.setting, args.value)
+
+def get_set_config_setting(client, config, args):
+    if args.value is None:
+        get_config_setting(client, config, args)
+    else:
+        set_config_setting(client, config, args)
+
+def add_config_parser(subs, client, config):
+    config_parser = subs.add_parser(u'config')
+    config_parser.add_argument(u'--global', dest=u'global_', action='store_true', help=u'change ~/.jiracli')
+    config_parser.add_argument(u'setting')
+    config_parser.add_argument(u'value', nargs='?')
+    config_parser.set_defaults(func=lambda args: get_set_config_setting(client, config, args))
+
+def print_known_settings():
+    for setting, info in jiracliconfig.known_settings:
+        print setting.ljust(30), '\t', info['help']
+
+def add_settings_parser(subs, client, config):
+    settings_parser = subs.add_parser(u'settings')
+    settings_parser.set_defaults(func=lambda args: print_known_settings())
 
 def add_config_subparsers(subs, client, config):
     # subs = parser.add_subparsers(title=u'Config commands')
-    config_parser = subs.add_parser(u'config')
-    config_subs = config_parser.add_subparsers()
-    add_loaded_parser(config_subs, client, config)
+    add_configs_parser(subs, client, config)
+    add_config_parser(subs, client, config)
+    add_settings_parser(subs, client, config)
 
 ################################################################################
 
@@ -486,12 +518,16 @@ def try_wipe_auth_token(client, config):
 def auth_fail_exception(exc):
     return exc.code == 500 and exc.message.find(u'RemoteAuthenticationException') != -1
 
+def local_command(args):
+    return args.command in ['config', 'configs', 'settings']
+
 def run_args(args, client, config):
     try:
-        if not try_reuse_auth_token(client, config):
-            if args.username is None:
-                args.username = ask_username()
-            client.login(args.username, ask_password())
+        if not local_command(args):
+            if not try_reuse_auth_token(client, config):
+                if args.username is None:
+                    args.username = ask_username()
+                client.login(args.username, ask_password())
         args.func(args)
         return True
     except jirarpc.RequestError as e:
@@ -506,18 +542,17 @@ def main():
     sys.argv = [a.decode('utf8') for a in sys.argv]
 
     config = jiracliconfig.Config()
-    config.load()
+    config.load(jiracliconfig.all_dotfiles())
 
     client = jirarpc.JsonRpcClient()
 
     parser = argparse.ArgumentParser()
     parser.add_argument(u'--username', help=u'user', default=config.username())
     parser.add_argument(u'--project', help=u'project key', default=config.project())
-    parser.add_argument(u'--rpcurl', help=u'url for json rpc', default=config.rpc_url())
     parser.add_argument(u'--editor', help=u'editor for comments, descriptions', default=config.editor())
     parser.add_argument(u'--tempdir', help=u'directory for temporary files', default=config.tempdir())
 
-    subs = parser.add_subparsers() # would like each add_*_subparser to create their own subparser group, alas...
+    subs = parser.add_subparsers(dest='command') # would like each add_*_subparser to create their own subparser group, alas...
     add_issue_subparsers(subs, client, config)
     add_find_subparsers(subs, client, config)
     add_info_subparsers(subs, client, config)
@@ -526,7 +561,7 @@ def main():
 
     args = parser.parse_args()
     add_implicit_project_arg(args)
-    client.set_rpc_url(args.rpcurl)
+    client.set_rpc_url(config.rpc_url())
 
     while True:
         if run_args(args, client, config):
