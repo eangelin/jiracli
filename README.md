@@ -1,7 +1,7 @@
 jiracli
 =======
 
-Quick and dirty command line access to useful parts of jira. Not at all stable and only ever used under cygwin.
+Quick-and-dirty command line access to useful parts of jira. Not at all stable and only ever used under cygwin.
 
 Setup
 -----
