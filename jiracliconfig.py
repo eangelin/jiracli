@@ -71,7 +71,7 @@ known_settings = [
 
 def known_setting(setting):
     setting_names = [s[0] for s in known_settings]
-    return setting in setting_names or re.match(u'jira\.[^_]_extensions', setting) is not None
+    return setting in setting_names or re.match(u'jira\.[^_]+_extensions', setting) is not None
 
 def _split_setting(setting):
     if not known_setting(setting):
