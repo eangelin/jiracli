@@ -29,8 +29,11 @@ def ask_password():
 
 ################################################################################
 
+def qualified_issue_key(key):
+    return u'-' in key
+
 def expand_issue_key(project, key):
-    return key if u'-' in key else project + u'-' + key
+    return key if qualified_issue_key(key) else project + u'-' + key
 
 def get_project_from_issue_key(key):
     return key.split(u'-')[0] if u'-' in key else None
@@ -40,32 +43,28 @@ def get_project_arg(args):
         return args.project
     raise ValueError(u'missing project key')
 
-def try_get_project_arg(args):
-    try:
-        return get_project_arg(args)
-    except:
-        return None
-
 def get_issue_arg(args):
     if args.issue is not None:
-        return args.issue
+        if qualified_issue_key(args.issue):
+            return args.issue
+        else:
+            return expand_issue_key(get_project_arg(args), args.issue)
     raise ValueError(u'missing issue key')
-
-def get_expanded_issue_arg(args):
-    return expand_issue_key(get_project_arg(args), get_issue_arg(args))
 
 def get_issues_arg(args):
     if args.issues is not None:
-        return args.issues
+        return [issue if qualified_issue_key(issue) else expand_issue_key(get_project_arg(args), issue)
+                for issue in args.issues]
     raise ValueError(u'missing issue keys')
 
-def get_expanded_issues_arg(args):
-    project = get_project_arg(args)
-    return [expand_issue_key(project, issue) for issue in get_issues_arg(args)]
-
 def add_implicit_project_arg(args):
-    if args.project is None and u'issue' in args and args.issue is not None:
-        args.project = get_project_from_issue_key(args.issue)
+    if args.project is None:
+        if u'issue' in args and args.issue is not None:
+            args.project = get_project_from_issue_key(args.issue)
+        elif u'issues' in args and args.issues is not None:
+            qualified_issue_keys = [issue for issue in args.issues if qualified_issue_key(issue)]
+            if qualified_issue_keys:
+                args.project = get_project_from_issue_key(qualified_issue_keys[0])
 
 ################################################################################
 
@@ -106,7 +105,7 @@ def mk_new_issue_func(client, config, itype):
     return lambda args: new_issue(client, config, itype, args)
 
 def del_issue(client, config, args):
-    client.delete_issue(get_expanded_issue_arg(args))
+    client.delete_issue(get_issue_arg(args))
 
 def show_resolutions(client, config, args):
     for r in client.get_resolutions():
@@ -121,11 +120,11 @@ def show_issue_types(client, config, args):
         print jirapprint.format_issue_type(it)
 
 def show_actions(client, config, args):
-    for a in client.get_available_actions(get_expanded_issue_arg(args)):
+    for a in client.get_available_actions(get_issue_arg(args)):
         print jirapprint.format_action(a)
 
 def show_edit_fields(client, config, args):
-    for f in client.get_fields_for_edit(get_expanded_issue_arg(args)):
+    for f in client.get_fields_for_edit(get_issue_arg(args)):
         print jirapprint.format_field(f)
 
 def show_permissions(client, config, args):
@@ -151,7 +150,7 @@ def show_info(client, config, args):
 
 def resolve_issue(client, config, fix, args):
     # always use Resolve Issue action, set status as resolved
-    client.progress_workflow_action(get_expanded_issue_arg(args), config.action_types()[u'resolve'],
+    client.progress_workflow_action(get_issue_arg(args), config.action_types()[u'resolve'],
                                     resolution=[config.resolution_types()[fix]],
                                     status=[config.statuses()[u'resolved']])
     if args.comment == '-':
@@ -163,13 +162,13 @@ def mk_resolve_issue_func(client, config, fix):
     return lambda args: resolve_issue(client, config, fix, args)
 
 def close_issue(client, config, args):
-    client.progress_workflow_action(get_expanded_issue_arg(args), config.action_types()[u'close'])
+    client.progress_workflow_action(get_issue_arg(args), config.action_types()[u'close'])
 
 def reopen_issue(client, config, args):
-    client.progress_workflow_action(get_expanded_issue_arg(args), config.action_types()[u'reopen'])
+    client.progress_workflow_action(get_issue_arg(args), config.action_types()[u'reopen'])
 
 def view_issue(client, config, args):
-    key = get_expanded_issue_arg(args)
+    key = get_issue_arg(args)
     issue = client.get_issue(key)
     comments = client.get_comments(key)
     if not args.summary:
@@ -178,17 +177,18 @@ def view_issue(client, config, args):
         print jirapprint.format_issue_summary(issue)
 
 def browse_issue(client, config, args):
-    key = get_expanded_issue_arg(args)
+    key = get_issue_arg(args)
     browse_command = config.browse_command(key)
     if browse_command:
         os.system(browse_command)
 
 default_order = u'updated desc, resolution desc'
+project_clause = u'project=%(project)s'
 
 find_what_map = {
-    u'open': u'project=%(project)s and status in (open, reopened) order by ' + default_order,
-    u'mine': u'project=%(project)s and status in (open, reopened) and assignee = "%(username)s" order by ' + default_order,
-    u'unassigned': u'project=%(project)s and status in (open, reopened) and assignee is empty order by ' + default_order
+    u'open': u'status in (open, reopened) order by ' + default_order,
+    u'mine': u'status in (open, reopened) and assignee = "%(username)s" order by ' + default_order,
+    u'unassigned': u'status in (open, reopened) and assignee is empty order by ' + default_order
 }
 
 def prefixed_version(version):
@@ -213,20 +213,21 @@ def strip_version_prefix(version):
 
 def find_issues(client, config, args):
     params = vars(args)
-
     jql_template = None
-
     if args.what in find_what_map:
         jql_template = find_what_map[args.what]
     elif prefixed_version(args.what): # treat as fixVersion
-        jql_template = u'project=%(project)s and fixVersion = "%(version)s" order by ' + default_order
+        jql_template = u'fixVersion = "%(version)s" order by ' + default_order
         params[u'version'] = strip_version_prefix(args.what)
     elif user_possessive_s(args.what) and user_exists(strip_possessive_s(args.what), client):
         jql_template = find_what_map['mine']
         params['username'] = strip_possessive_s(args.what)
     else:
-        jql_template = u'project=%(project)s and (summary ~ "%(search)s" OR description ~ "%(search)s" OR comment ~ "%(search)s") order by ' + default_order
+        jql_template = u'(summary ~ "%(search)s" OR description ~ "%(search)s" OR comment ~ "%(search)s") order by ' + default_order
         params[u'search'] = args.what
+
+    if args.project:
+        jql_template = project_clause + u' and ' + jql_template
 
     issues = client.get_issues_from_jql_search(jql_template % params) if jql_template is not None else []
 
@@ -244,14 +245,14 @@ def list_versions(client, config, args):
 def add_comment(client, config, args):
     if args.comment == '-':
         args.comment = read_multiline(args, 'comment')
-    client.add_comment(get_expanded_issue_arg(args), args.comment)
+    client.add_comment(get_issue_arg(args), args.comment)
 
 def assign_issues_to_me(client, config, args):
-    for issue in get_expanded_issues_arg(args):
+    for issue in get_issues_arg(args):
         client.update_issue(issue, assignee=[args.username])
 
 def unassign_issues(client, config, args):
-    for issue in get_expanded_issues_arg(args):
+    for issue in get_issues_arg(args):
         client.update_issue(issue, assignee=[])
 
 def get_version_id(versions, version):
@@ -306,7 +307,7 @@ def release_version(client, config, args):
 
 def fixin_version(client, config, args):
     version_id = get_version_id(client.get_versions(get_project_arg(args)), args.version)
-    issues = get_expanded_issues_arg(args)
+    issues = get_issues_arg(args)
     for issue in issues:
         client.update_issue(issue, fixVersions=[version_id])
 
@@ -491,7 +492,7 @@ def slurp_config_auth_token_store(config):
     except IOError:
         return None
 
-def try_reuse_auth_token(client, config):
+def reuse_auth_token(client, config):
     if config.auth_token_store() is not None:
         token = slurp_config_auth_token_store(config)
         if token is not None:
@@ -500,12 +501,12 @@ def try_reuse_auth_token(client, config):
     return False
 
 
-def try_save_auth_token(client, config):
+def save_auth_token(client, config):
     if config.auth_token_store() is not None and client.auth_token() is not None:
         with open(config.auth_token_store(), "wb") as f:
             f.write(client.auth_token())
 
-def try_wipe_auth_token(client, config):
+def wipe_auth_token(client, config):
     try:
         client.set_auth_token(None)
         if config.auth_token_store() is not None:
@@ -524,7 +525,7 @@ def local_command(args):
 def run_args(args, client, config):
     try:
         if not local_command(args):
-            if not try_reuse_auth_token(client, config):
+            if not reuse_auth_token(client, config):
                 if args.username is None:
                     args.username = ask_username()
                 client.login(args.username, ask_password())
@@ -533,7 +534,7 @@ def run_args(args, client, config):
     except jirarpc.RequestError as e:
         print e.message
         if auth_fail_exception(e):
-            try_wipe_auth_token(client, config)
+            wipe_auth_token(client, config)
             return False
         return True
 
@@ -563,11 +564,14 @@ def main():
     add_implicit_project_arg(args)
     client.set_rpc_url(config.rpc_url())
 
-    while True:
-        if run_args(args, client, config):
-            break
+    try:
+        while True:
+            if run_args(args, client, config):
+                break
+    except ValueError as e:
+        print e
 
-    try_save_auth_token(client, config)
+    save_auth_token(client, config)
 
 if __name__ == '__main__':
     main()
