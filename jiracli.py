@@ -76,23 +76,26 @@ def input_multiline():
             return u'\n'.join(lines[0:-1])
         lines.append(line)
 
-def edit_multiline(args, what='input'):
+def edit_multiline(what, args):
     with util.TemporaryDirectory(basedir=args.tempdir) as tempdir:
         filepath = tempdir + '/' + what
         util.create_file(filepath)
         edit_command = args.editor + ' ' + filepath
         if os.system(edit_command) == 0:
             res = util.slurp(filepath)
-            print res
             return res
     return ''
 
-def read_multiline(args, what='inupt'):
-    return edit_multiline(args, what) if args.editor else input_multiline()
+def expand_text_arg(initial, what, args):
+    if initial == u'-':
+        return sys.stdin.read()
+    elif initial == u'+':
+        return edit_multiline(what, args) if args.editor else input_multiline()
+    else:
+        return initial
 
 def new_issue(client, config, itype, args):
-    if args.description == '-':
-        args.description = read_multiline(args, 'description')
+    args.description = expand_text_arg(args.description, u'description', args)
     project_module = config.project_module(get_project_arg(args))
     customs = {}
     if hasattr(project_module, u'new_issue_customs'):
@@ -153,8 +156,7 @@ def resolve_issue(client, config, fix, args):
     client.progress_workflow_action(get_issue_arg(args), config.action_types()[u'resolve'],
                                     resolution=[config.resolution_types()[fix]],
                                     status=[config.statuses()[u'resolved']])
-    if args.comment == '-':
-        args.comment = read_multiline(args, 'comment')
+    args.comment = expand_text_arg(args.comment, u'comment', args)
     if args.comment is not None:
         add_comment(client, config, args)
 
@@ -243,8 +245,7 @@ def list_versions(client, config, args):
         print jirapprint.short_format_version(v)
 
 def add_comment(client, config, args):
-    if args.comment == '-':
-        args.comment = read_multiline(args, 'comment')
+    args.comment = expand_text_arg(args.comment, u'comment', args)
     client.add_comment(get_issue_arg(args), args.comment)
 
 def assign_issues_to_me(client, config, args):
