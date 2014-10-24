@@ -196,6 +196,9 @@ find_what_map = {
 def prefixed_version(version):
     return version and version[0] == u'@'
 
+def strip_version_prefix(version):
+    return version[1:] if prefixed_version(version) else version
+
 def user_possessive_s(username):
     return username and username[-1] == u's'
 
@@ -209,9 +212,6 @@ def strip_possessive_s(username):
 
 def user_exists(username, client):
     return client.get_user(username)
-
-def strip_version_prefix(version):
-    return version[1:] if prefixed_version(version) else version
 
 def find_issues(client, config, args):
     params = vars(args)
