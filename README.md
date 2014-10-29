@@ -13,7 +13,7 @@ Tell jiracli about your jira-installation:
 	
 Optionally present yourself, otherwise jiracli will use logged in user name:
 
-	$ jiracil config --global jira.username
+	$ jiracli config --global jira.username eangelin
 	
 Optionally tell jiracli where to put an auth token from jira, so you don't have to type your password all the time:
 
